@@ -159,20 +159,6 @@ fn format_fade(secs: f64) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Monitoring subscription commands
-// ---------------------------------------------------------------------------
-
-/// Monitoring commands sent immediately after login.
-pub fn monitoring_commands() -> Vec<String> {
-    vec![
-        "#MONITORING,12,2".into(),  // prompt state
-        "#MONITORING,5,1".into(),   // zone output level changes
-        "#MONITORING,3,1".into(),   // button press/release
-        "#MONITORING,6,1".into(),   // occupancy sensor
-    ]
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

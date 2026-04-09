@@ -15,7 +15,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-use super::protocol::{LipMessage, monitoring_commands};
+use super::protocol::LipMessage;
 
 // ---------------------------------------------------------------------------
 // Reader
@@ -109,7 +109,6 @@ pub async fn connect(
     let write_tx = spawn_writer(write_half);
 
     login(&mut reader, &write_tx, username, password).await?;
-    send_monitoring(&write_tx).await?;
 
     info!("Lutron RA2 ready");
     Ok((reader, write_tx))
@@ -136,13 +135,6 @@ async fn login(
         .context("Timed out waiting for GNET> after login")?;
 
     info!("Lutron RA2 login successful");
-    Ok(())
-}
-
-async fn send_monitoring(write_tx: &mpsc::Sender<String>) -> Result<()> {
-    for cmd in monitoring_commands() {
-        send_line(write_tx, &cmd).await?;
-    }
     Ok(())
 }
 
