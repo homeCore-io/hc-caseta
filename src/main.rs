@@ -39,7 +39,14 @@ async fn main() {
 
     for attempt in 1..=MAX_ATTEMPTS {
         info!(attempt, max = MAX_ATTEMPTS, "Starting hc-caseta plugin");
-        match try_start(&cfg, &config_path, log_level_handle.clone(), mqtt_log_handle.clone()).await {
+        match try_start(
+            &cfg,
+            &config_path,
+            log_level_handle.clone(),
+            mqtt_log_handle.clone(),
+        )
+        .await
+        {
             Ok(()) => return,
             Err(e) => {
                 if attempt < MAX_ATTEMPTS {
@@ -58,7 +65,13 @@ async fn main() {
 // Logging initialisation
 // ---------------------------------------------------------------------------
 
-fn init_logging(config_path: &str) -> (tracing_appender::non_blocking::WorkerGuard, hc_logging::LogLevelHandle, plugin_sdk_rs::mqtt_log_layer::MqttLogHandle) {
+fn init_logging(
+    config_path: &str,
+) -> (
+    tracing_appender::non_blocking::WorkerGuard,
+    hc_logging::LogLevelHandle,
+    plugin_sdk_rs::mqtt_log_layer::MqttLogHandle,
+) {
     #[derive(serde::Deserialize, Default)]
     struct Bootstrap {
         #[serde(default)]
@@ -68,20 +81,30 @@ fn init_logging(config_path: &str) -> (tracing_appender::non_blocking::WorkerGua
         .ok()
         .and_then(|s| toml::from_str(&s).ok())
         .unwrap_or_default();
-    logging::init_logging(config_path, "hc-caseta", "hc_caseta=info", &bootstrap.logging)
+    logging::init_logging(
+        config_path,
+        "hc-caseta",
+        "hc_caseta=info",
+        &bootstrap.logging,
+    )
 }
 
 // ---------------------------------------------------------------------------
 // Startup — retried up to MAX_ATTEMPTS on failure
 // ---------------------------------------------------------------------------
 
-async fn try_start(cfg: &Config, config_path: &str, log_level_handle: hc_logging::LogLevelHandle, mqtt_log_handle: plugin_sdk_rs::mqtt_log_layer::MqttLogHandle) -> Result<()> {
+async fn try_start(
+    cfg: &Config,
+    config_path: &str,
+    log_level_handle: hc_logging::LogLevelHandle,
+    mqtt_log_handle: plugin_sdk_rs::mqtt_log_layer::MqttLogHandle,
+) -> Result<()> {
     // --- Plugin SDK connection --------------------------------------------------
     let sdk_config = PluginConfig {
         broker_host: cfg.homecore.broker_host.clone(),
         broker_port: cfg.homecore.broker_port,
-        plugin_id:   cfg.homecore.plugin_id.clone(),
-        password:    cfg.homecore.password.clone(),
+        plugin_id: cfg.homecore.plugin_id.clone(),
+        password: cfg.homecore.password.clone(),
     };
 
     let client = PluginClient::connect(sdk_config).await?;
@@ -124,7 +147,9 @@ async fn try_start(cfg: &Config, config_path: &str, log_level_handle: hc_logging
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // --- Build device registry --------------------------------------------------
-    let devices: Vec<DeviceEntry> = cfg.devices.iter()
+    let devices: Vec<DeviceEntry> = cfg
+        .devices
+        .iter()
         .map(|d| DeviceEntry::new(d.clone()))
         .collect();
 
@@ -137,7 +162,10 @@ async fn try_start(cfg: &Config, config_path: &str, log_level_handle: hc_logging
         .into_iter()
         .filter(|id| !current_ids.contains(id))
     {
-        if let Err(e) = publisher.unregister_device(&cfg.homecore.plugin_id, &stale_id).await {
+        if let Err(e) = publisher
+            .unregister_device(&cfg.homecore.plugin_id, &stale_id)
+            .await
+        {
             error!(device_id = %stale_id, error = %e, "Failed to unregister stale device");
         } else {
             info!(device_id = %stale_id, "Unregistered stale device");
@@ -166,7 +194,10 @@ async fn try_start(cfg: &Config, config_path: &str, log_level_handle: hc_logging
         }
     }
 
-    info!(devices = devices.len(), "All devices registered with HomeCore");
+    info!(
+        devices = devices.len(),
+        "All devices registered with HomeCore"
+    );
     save_published_ids(&cache_path, &current_ids)?;
 
     // --- Build and run bridge ---------------------------------------------------

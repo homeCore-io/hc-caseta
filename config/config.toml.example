@@ -1,6 +1,6 @@
 # hc-caseta — Lutron Caseta Pro Bridge plugin for HomeCore
 #
-# Copy to config.dev.toml and fill in your values.
+# Copy to config.toml and fill in your values.
 #
 # Connects to a Caseta Smart Bridge Pro (L-BDGPRO2-WH) via the Lutron
 # Integration Protocol (LIP) over telnet.  The standard Caseta bridge

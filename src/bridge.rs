@@ -12,9 +12,7 @@ use tracing::{debug, error, info, warn};
 use crate::config::CasetaConfig;
 use crate::devices::DeviceEntry;
 use crate::lip::connection::{connect, send_cmd, send_keepalive};
-use crate::lip::protocol::{
-    query_output, DeviceAction, LipMessage, OccupancyState, OutputAction,
-};
+use crate::lip::protocol::{query_output, DeviceAction, LipMessage, OccupancyState, OutputAction};
 use plugin_sdk_rs::DevicePublisher;
 
 // ---------------------------------------------------------------------------
@@ -59,7 +57,9 @@ impl Bridge {
         loop {
             match self.run_once(&mut cmd_rx).await {
                 Ok(()) => info!("Bridge session ended cleanly"),
-                Err(e) => error!(error = %e, "Bridge session error — reconnecting in {}s", delay.as_secs()),
+                Err(e) => {
+                    error!(error = %e, "Bridge session error — reconnecting in {}s", delay.as_secs())
+                }
             }
             for dev in self.devices.values() {
                 let _ = self.publisher.publish_availability(&dev.hc_id, false).await;
@@ -133,7 +133,11 @@ impl Bridge {
 
     async fn handle_lip_message(&mut self, msg: LipMessage) {
         match msg {
-            LipMessage::Output { integration_id, action, value } => {
+            LipMessage::Output {
+                integration_id,
+                action,
+                value,
+            } => {
                 if action != OutputAction::ZoneLevel {
                     debug!(id = integration_id, ?action, "Non-level output action");
                     return;
@@ -145,23 +149,33 @@ impl Bridge {
                 }
             }
 
-            LipMessage::Device { integration_id, component, action } => {
+            LipMessage::Device {
+                integration_id,
+                component,
+                action,
+            } => {
                 if let Some(dev) = self.devices.get(&integration_id) {
                     if !dev.is_button_device() {
                         return;
                     }
                     let event = match action {
-                        DeviceAction::Press       => "press",
-                        DeviceAction::Release     => "release",
+                        DeviceAction::Press => "press",
+                        DeviceAction::Release => "release",
                         DeviceAction::DoubleClick => "double_click",
                     };
                     let attr = format!("button_{component}");
                     let patch = serde_json::json!({ &attr: event });
-                    let _ = self.publisher.publish_state_partial(&dev.hc_id, &patch).await;
+                    let _ = self
+                        .publisher
+                        .publish_state_partial(&dev.hc_id, &patch)
+                        .await;
                 }
             }
 
-            LipMessage::Group { integration_id, state } => {
+            LipMessage::Group {
+                integration_id,
+                state,
+            } => {
                 if let Some(dev) = self.devices.get(&integration_id) {
                     if dev.is_group() {
                         let occupied = state == OccupancyState::Occupied;
@@ -190,7 +204,9 @@ impl Bridge {
             debug!(hc_id, "Command for unknown device");
             return;
         };
-        let Some(dev) = self.devices.get(&integration_id) else { return };
+        let Some(dev) = self.devices.get(&integration_id) else {
+            return;
+        };
 
         let cmds = dev.translate_command(payload, self.global_fade);
         for cmd in &cmds {
@@ -200,7 +216,8 @@ impl Bridge {
         }
 
         if let Some(state) = optimistic_state(payload, dev) {
-            let _ = self.publisher
+            let _ = self
+                .publisher
                 .publish_state_partial_for_command(&dev.hc_id, &state, payload, "caseta")
                 .await;
         }
@@ -239,9 +256,10 @@ fn optimistic_state(cmd: &serde_json::Value, dev: &DeviceEntry) -> Option<serde_
                 None
             }
         }
-        DeviceKind::Switch => {
-            cmd.get("on").and_then(|v| v.as_bool()).map(|on| serde_json::json!({"on": on}))
-        }
+        DeviceKind::Switch => cmd
+            .get("on")
+            .and_then(|v| v.as_bool())
+            .map(|on| serde_json::json!({"on": on})),
         DeviceKind::FanControl => {
             if let Some(speed) = cmd.get("speed").and_then(|v| v.as_str()) {
                 Some(serde_json::json!({"on": speed != "off", "speed": speed}))

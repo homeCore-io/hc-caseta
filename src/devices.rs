@@ -24,11 +24,11 @@ impl DeviceEntry {
     /// HomeCore device_type string for registration.
     pub fn homecore_device_type(&self) -> &str {
         match self.config.kind {
-            DeviceKind::Dimmer          => "light",
-            DeviceKind::Switch          => "switch",
-            DeviceKind::Shade           => "cover",
-            DeviceKind::FanControl      => "fan",
-            DeviceKind::Pico            => "pico_remote",
+            DeviceKind::Dimmer => "light",
+            DeviceKind::Switch => "switch",
+            DeviceKind::Shade => "cover",
+            DeviceKind::FanControl => "fan",
+            DeviceKind::Pico => "pico_remote",
             DeviceKind::OccupancySensor => "occupancy_sensor",
         }
     }
@@ -72,16 +72,20 @@ impl DeviceEntry {
                 "on": level > 0.0,
             })),
             DeviceKind::Shade => {
-                let pos = if self.config.invert_position { 100.0 - level } else { level };
+                let pos = if self.config.invert_position {
+                    100.0 - level
+                } else {
+                    level
+                };
                 Some(serde_json::json!({ "position": (pos * 10.0).round() / 10.0 }))
             }
             DeviceKind::FanControl => {
                 let speed = match level as u32 {
-                    0       => "off",
-                    1..=25  => "low",
+                    0 => "off",
+                    1..=25 => "low",
                     26..=50 => "medium",
                     51..=75 => "medium-high",
-                    _       => "high",
+                    _ => "high",
                 };
                 Some(serde_json::json!({
                     "on":    level > 0.0,
@@ -107,7 +111,9 @@ impl DeviceEntry {
 
     /// Translate a HomeCore command payload into LIP command strings.
     pub fn translate_command(&self, cmd: &Value, global_fade: f64) -> Vec<String> {
-        let fade = cmd["fade_secs"].as_f64().unwrap_or_else(|| self.fade_secs(global_fade));
+        let fade = cmd["fade_secs"]
+            .as_f64()
+            .unwrap_or_else(|| self.fade_secs(global_fade));
         let id = self.config.integration_id;
 
         match self.config.kind {
@@ -121,7 +127,11 @@ impl DeviceEntry {
                         b.clamp(0.0, 100.0)
                     }
                 } else if let Some(on) = cmd["on"].as_bool() {
-                    if on { 100.0 } else { 0.0 }
+                    if on {
+                        100.0
+                    } else {
+                        0.0
+                    }
                 } else {
                     return vec![];
                 };
@@ -130,16 +140,20 @@ impl DeviceEntry {
 
             DeviceKind::Switch => {
                 let level = match cmd["on"].as_bool() {
-                    Some(true)  => 100.0,
+                    Some(true) => 100.0,
                     Some(false) => 0.0,
-                    None        => return vec![],
+                    None => return vec![],
                 };
                 vec![cmd_set_level(id, level, 0.0)]
             }
 
             DeviceKind::Shade => {
                 if let Some(pos) = cmd["position"].as_f64() {
-                    let level = if self.config.invert_position { 100.0 - pos } else { pos };
+                    let level = if self.config.invert_position {
+                        100.0 - pos
+                    } else {
+                        pos
+                    };
                     vec![cmd_set_level(id, level.clamp(0.0, 100.0), 0.0)]
                 } else if cmd["raise"].as_bool() == Some(true) {
                     vec![cmd_shade_action(id, 2)]
@@ -155,17 +169,21 @@ impl DeviceEntry {
             DeviceKind::FanControl => {
                 let level = if let Some(speed) = cmd["speed"].as_str() {
                     match speed {
-                        "off"         => 0.0,
-                        "low"         => 25.0,
-                        "medium"      => 50.0,
+                        "off" => 0.0,
+                        "low" => 25.0,
+                        "medium" => 50.0,
                         "medium-high" => 75.0,
-                        "high"        => 100.0,
-                        _             => return vec![],
+                        "high" => 100.0,
+                        _ => return vec![],
                     }
                 } else if let Some(pct) = cmd["speed_pct"].as_f64() {
                     pct.clamp(0.0, 100.0)
                 } else if let Some(on) = cmd["on"].as_bool() {
-                    if on { 50.0 } else { 0.0 }
+                    if on {
+                        50.0
+                    } else {
+                        0.0
+                    }
                 } else {
                     return vec![];
                 };
