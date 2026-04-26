@@ -107,7 +107,12 @@ async fn try_start(
         password: cfg.homecore.password.clone(),
     };
 
-    let client = PluginClient::connect(sdk_config).await?;
+    let client = PluginClient::connect(sdk_config)
+        .await?
+        // Cross-restart device tracking via the SDK. Same path the
+        // plugin used to manage by hand, so existing snapshots are
+        // picked up unchanged.
+        .with_device_persistence(published_ids_cache_path(config_path));
     mqtt_log_handle.connect(
         client.mqtt_client(),
         &cfg.homecore.plugin_id,
@@ -153,24 +158,8 @@ async fn try_start(
         .map(|d| DeviceEntry::new(d.clone()))
         .collect();
 
-    let current_ids: Vec<String> = devices.iter().map(|d| d.hc_id.clone()).collect();
-    let cache_path = published_ids_cache_path(config_path);
-
-    // --- Clean up stale devices from previous config ----------------------------
-    let previous_ids = load_published_ids(&cache_path);
-    for stale_id in previous_ids
-        .into_iter()
-        .filter(|id| !current_ids.contains(id))
-    {
-        if let Err(e) = publisher
-            .unregister_device(&cfg.homecore.plugin_id, &stale_id)
-            .await
-        {
-            error!(device_id = %stale_id, error = %e, "Failed to unregister stale device");
-        } else {
-            info!(device_id = %stale_id, "Unregistered stale device");
-        }
-    }
+    let live: std::collections::HashSet<String> =
+        devices.iter().map(|d| d.hc_id.clone()).collect();
 
     // --- Register all devices with HomeCore ------------------------------------
     for dev in &devices {
@@ -198,7 +187,12 @@ async fn try_start(
         devices = devices.len(),
         "All devices registered with HomeCore"
     );
-    save_published_ids(&cache_path, &current_ids)?;
+
+    // Reconcile against the SDK-tracked set: anything from a prior
+    // session that's no longer in [[devices]] gets unregistered.
+    if let Err(e) = publisher.reconcile_devices(live).await {
+        warn!(error = %e, "reconcile_devices failed");
+    }
 
     // --- Build and run bridge ---------------------------------------------------
     let mut bridge = bridge::Bridge::new(devices, publisher, cfg.caseta.clone());
@@ -213,15 +207,3 @@ fn published_ids_cache_path(config_path: &str) -> PathBuf {
         .join(".published-device-ids.json")
 }
 
-fn load_published_ids(path: &Path) -> Vec<String> {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
-        .unwrap_or_default()
-}
-
-fn save_published_ids(path: &Path, device_ids: &[String]) -> Result<()> {
-    let payload = serde_json::to_vec_pretty(device_ids)?;
-    std::fs::write(path, payload)?;
-    Ok(())
-}
