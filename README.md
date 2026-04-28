@@ -1,5 +1,7 @@
 # hc-caseta
 
+[![CI](https://github.com/homeCore-io/hc-caseta/actions/workflows/ci.yml/badge.svg)](https://github.com/homeCore-io/hc-caseta/actions/workflows/ci.yml) [![Release](https://github.com/homeCore-io/hc-caseta/actions/workflows/release.yml/badge.svg)](https://github.com/homeCore-io/hc-caseta/actions/workflows/release.yml) [![Dashboard](https://img.shields.io/badge/builds-dashboard-blue?style=flat-square)](https://homecore.io/lf-workflow-dash/)
+
 Bridges Lutron Caseta Smart Bridge Pro devices into HomeCore via the Lutron Integration Protocol (LIP) over telnet.
 
 Requires the **Caseta Smart Bridge Pro** (L-BDGPRO2-WH). The standard Caseta bridge does not support telnet integration.
