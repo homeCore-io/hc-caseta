@@ -158,8 +158,7 @@ async fn try_start(
         .map(|d| DeviceEntry::new(d.clone()))
         .collect();
 
-    let live: std::collections::HashSet<String> =
-        devices.iter().map(|d| d.hc_id.clone()).collect();
+    let live: std::collections::HashSet<String> = devices.iter().map(|d| d.hc_id.clone()).collect();
 
     // --- Register all devices with HomeCore ------------------------------------
     for dev in &devices {
@@ -206,4 +205,3 @@ fn published_ids_cache_path(config_path: &str) -> PathBuf {
         .unwrap_or_else(|| Path::new("."))
         .join(".published-device-ids.json")
 }
-
