@@ -250,10 +250,10 @@ fn optimistic_state(cmd: &serde_json::Value, dev: &DeviceEntry) -> Option<serde_
         DeviceKind::Dimmer => {
             if let Some(b) = cmd.get("brightness_pct").and_then(|v| v.as_f64()) {
                 Some(serde_json::json!({"on": b > 0.0, "brightness_pct": b}))
-            } else if let Some(on) = cmd.get("on").and_then(|v| v.as_bool()) {
-                Some(serde_json::json!({"on": on}))
             } else {
-                None
+                cmd.get("on")
+                    .and_then(|v| v.as_bool())
+                    .map(|on| serde_json::json!({"on": on}))
             }
         }
         DeviceKind::Switch => cmd
@@ -263,10 +263,10 @@ fn optimistic_state(cmd: &serde_json::Value, dev: &DeviceEntry) -> Option<serde_
         DeviceKind::FanControl => {
             if let Some(speed) = cmd.get("speed").and_then(|v| v.as_str()) {
                 Some(serde_json::json!({"on": speed != "off", "speed": speed}))
-            } else if let Some(on) = cmd.get("on").and_then(|v| v.as_bool()) {
-                Some(serde_json::json!({"on": on}))
             } else {
-                None
+                cmd.get("on")
+                    .and_then(|v| v.as_bool())
+                    .map(|on| serde_json::json!({"on": on}))
             }
         }
         _ => None,
