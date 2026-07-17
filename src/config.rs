@@ -18,11 +18,25 @@ pub fn config_schema() -> Option<serde_json::Value> {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Config {
     pub homecore: HomecoreConfig,
+    #[serde(default)]
     pub caseta: CasetaConfig,
     #[serde(default)]
     pub logging: crate::logging::LoggingConfig,
     #[serde(default)]
     pub devices: Vec<DeviceConfig>,
+}
+
+impl Default for CasetaConfig {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: default_lip_port(),
+            username: default_username(),
+            password: default_password(),
+            default_fade_secs: default_fade_secs(),
+            reconnect_delay_secs: default_reconnect_delay_secs(),
+        }
+    }
 }
 
 impl Config {
