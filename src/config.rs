@@ -1,7 +1,21 @@
 use anyhow::Result;
 use serde::Deserialize;
 
+/// Operator-config JSON Schema, published on the capability manifest so the
+/// hc-web editor renders a typed form. `None` without the `schema` feature.
+#[cfg(feature = "schema")]
+pub fn config_schema() -> Option<serde_json::Value> {
+    serde_json::to_value(schemars::schema_for!(Config)).ok()
+}
+
+#[cfg(not(feature = "schema"))]
+pub fn config_schema() -> Option<serde_json::Value> {
+    None
+}
+
+
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Config {
     pub homecore: HomecoreConfig,
     pub caseta: CasetaConfig,
@@ -24,6 +38,7 @@ impl Config {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HomecoreConfig {
     #[serde(default = "default_broker_host")]
     pub broker_host: String,
@@ -50,6 +65,7 @@ fn default_plugin_id() -> String {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CasetaConfig {
     pub host: String,
     #[serde(default = "default_lip_port")]
@@ -87,6 +103,7 @@ fn default_reconnect_delay_secs() -> u64 {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceKind {
     /// Dimmable light — brightness 0-100 with optional fade.
@@ -104,6 +121,7 @@ pub enum DeviceKind {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DeviceConfig {
     pub integration_id: u32,
     pub name: String,
