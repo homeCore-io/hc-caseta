@@ -79,14 +79,29 @@ pub fn config_descriptor() -> serde_json::Value {
         .section(
             Section::new("devices", "Devices")
                 .field(Field::note(
-                    "Caséta has no queryable device list, so add each device by its \
-                     integration ID — find IDs in the Lutron app or at \
-                     http://{bridge}/DbXmlInfo.xml on a PRO bridge.",
+                    "Caséta has no queryable device list, so devices are added by \
+                     integration ID. Rather than typing them, paste the integration \
+                     report the Lutron app emails you — it carries every ID, name \
+                     and room.",
                 ))
+                .field(
+                    Field::import("import_integration_report")
+                        .label("Paste integration report")
+                        .targets(["devices", "scenes"])
+                        .placeholder("{ \"LIPIdList\": { \"Devices\": [...], \"Zones\": [...] } }")
+                        .help(
+                            "Lutron app → Settings → Advanced → Integration → Send \
+                             Integration Report. Rows are added below for review and \
+                             are not saved until you save.",
+                        ),
+                )
                 .field(
                     Field::table("devices")
                         .label("Devices")
                         .render("cards")
+                        // Identity for the importer: re-pasting a report
+                        // updates nothing and duplicates nothing.
+                        .key_by("integration_id")
                         .help("Each row maps a Caséta integration ID to a homeCore device.")
                         .columns([
                             Field::int("integration_id").label("Integration ID"),
@@ -117,6 +132,37 @@ pub fn config_descriptor() -> serde_json::Value {
                             Field::toggle("invert_position")
                                 .label("Invert position")
                                 .default(false),
+                        ]),
+                ),
+        )
+        .section(
+            Section::new("scenes", "Scenes")
+                .field(Field::note(
+                    "Scenes are the Smart Bridge's phantom buttons, programmed in the \
+                     Lutron app. Activating one here presses it, exactly as a wall \
+                     control would.",
+                ))
+                .field(
+                    Field::table("scenes")
+                        .label("Scenes")
+                        .render("cards")
+                        .key_by("button_component")
+                        .columns([
+                            Field::text("name").label("Name"),
+                            Field::int("button_component")
+                                .label("Phantom button")
+                                .min(1)
+                                .max(100)
+                                .help("Component number shown in the integration report."),
+                            Field::int("bridge_id")
+                                .label("Bridge ID")
+                                .default(1)
+                                .help("Integration ID of the Smart Bridge — almost always 1."),
+                            Field::select("area")
+                                .label("Room")
+                                .placeholder("Unassigned")
+                                .allow_create()
+                                .source(Source::core_resource("areas")),
                         ]),
                 ),
         )
@@ -195,6 +241,8 @@ pub struct Config {
     pub logging: crate::logging::LoggingConfig,
     #[serde(default)]
     pub devices: Vec<DeviceConfig>,
+    #[serde(default)]
+    pub scenes: Vec<SceneConfig>,
 }
 
 impl Default for CasetaConfig {
@@ -284,6 +332,49 @@ fn default_reconnect_delay_secs() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
+// Scene config
+// ---------------------------------------------------------------------------
+
+/// A scene stored on the Smart Bridge as a *phantom button*.
+///
+/// The bridge exposes 100 of them (integration ID 1 in the LIP integration
+/// report). Activating one is a press/release pair on its component, exactly
+/// as a physical button would be — the bridge then runs whatever the Lutron
+/// app programmed onto it.
+///
+/// HomeCore device ID: `caseta_scene_{name_slug}`
+/// Commands accepted:  `{ "activate": true }`
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SceneConfig {
+    pub name: String,
+    /// Integration ID of the Smart Bridge itself — almost always 1.
+    #[serde(default = "default_bridge_id")]
+    pub bridge_id: u32,
+    /// Phantom button component number (1-100) assigned in the Lutron app.
+    pub button_component: u32,
+    /// Optional HomeCore area tag.
+    pub area: Option<String>,
+}
+
+fn default_bridge_id() -> u32 {
+    1
+}
+
+impl SceneConfig {
+    /// HomeCore device ID: `caseta_scene_{name_slug}`.
+    pub fn hc_id(&self) -> String {
+        let slug = self
+            .name
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '_' })
+            .collect::<String>();
+        format!("caseta_scene_{slug}")
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Device config
 // ---------------------------------------------------------------------------
 
@@ -310,7 +401,15 @@ pub enum DeviceKind {
 pub struct DeviceConfig {
     pub integration_id: u32,
     pub name: String,
-    pub kind: DeviceKind,
+    /// Absent until the operator picks one.
+    ///
+    /// The integration report carries no load type, so an imported row arrives
+    /// without a kind. Requiring it here would mean a freshly imported config
+    /// refused to parse and took the whole plugin offline; instead such a row
+    /// is skipped at startup, named in the log, and works the moment a kind is
+    /// chosen.
+    #[serde(default)]
+    pub kind: Option<DeviceKind>,
     pub area: Option<String>,
     /// Per-device fade time override (seconds).  Falls back to caseta.default_fade_secs.
     pub fade_secs: Option<f64>,
@@ -328,6 +427,53 @@ pub struct DeviceConfig {
 #[cfg(all(test, feature = "schema"))]
 mod tests {
     use super::*;
+
+    /// An imported row has no `kind` until the operator picks one, and the
+    /// integration report cannot supply it. Making `kind` mandatory meant the
+    /// first save after an import failed to parse — `missing field \`kind\`` —
+    /// and took the whole plugin offline, holiday lights and all.
+    #[test]
+    fn a_device_without_a_kind_still_parses() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [homecore]
+            [caseta]
+            host = "10.0.0.5"
+
+            [[devices]]
+            integration_id = 2
+            name = "Holiday Lights 1"
+            area = "Living Room"
+
+            [[devices]]
+            integration_id = 6
+            name = "Pico"
+            kind = "pico"
+            "#,
+        )
+        .expect("an unclassified device must not break the config");
+        assert_eq!(cfg.devices.len(), 2);
+        assert!(cfg.devices[0].kind.is_none());
+        assert_eq!(cfg.devices[1].kind, Some(DeviceKind::Pico));
+    }
+
+    /// …and such a row is simply not registered, rather than guessed at.
+    #[test]
+    fn an_unclassified_device_builds_no_entry() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [homecore]
+            [caseta]
+            host = "10.0.0.5"
+
+            [[devices]]
+            integration_id = 2
+            name = "Holiday Lights 1"
+            "#,
+        )
+        .unwrap();
+        assert!(crate::devices::DeviceEntry::new(cfg.devices[0].clone()).is_none());
+    }
 
     /// A published descriptor is *authoritative* — the editor renders it
     /// instead of deriving from the schema — so any omitted config field

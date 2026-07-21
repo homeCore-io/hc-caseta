@@ -10,9 +10,11 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::config::CasetaConfig;
-use crate::devices::DeviceEntry;
+use crate::devices::{DeviceEntry, SceneEntry};
 use crate::lip::connection::{connect, send_cmd, send_keepalive};
-use crate::lip::protocol::{query_output, DeviceAction, LipMessage, OccupancyState, OutputAction};
+use crate::lip::protocol::{
+    cmd_device_action, query_output, DeviceAction, LipMessage, OccupancyState, OutputAction,
+};
 use plugin_sdk_rs::DevicePublisher;
 
 // ---------------------------------------------------------------------------
@@ -22,6 +24,9 @@ use plugin_sdk_rs::DevicePublisher;
 pub struct Bridge {
     devices: HashMap<u32, DeviceEntry>,
     hc_to_id: HashMap<String, u32>,
+    scenes: Vec<SceneEntry>,
+    /// hc_id → index into `scenes`
+    hc_to_scene: HashMap<String, usize>,
     publisher: DevicePublisher,
     caseta_cfg: CasetaConfig,
     global_fade: f64,
@@ -30,6 +35,7 @@ pub struct Bridge {
 impl Bridge {
     pub fn new(
         devices: Vec<DeviceEntry>,
+        scenes: Vec<SceneEntry>,
         publisher: DevicePublisher,
         caseta_cfg: CasetaConfig,
     ) -> Self {
@@ -42,9 +48,17 @@ impl Bridge {
             dev_map.insert(dev.config.integration_id, dev);
         }
 
+        let hc_to_scene = scenes
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.hc_id.clone(), i))
+            .collect();
+
         Self {
             devices: dev_map,
             hc_to_id: hc_map,
+            scenes,
+            hc_to_scene,
             publisher,
             caseta_cfg,
             global_fade,
@@ -200,6 +214,35 @@ impl Bridge {
         payload: &serde_json::Value,
         writer: &mpsc::Sender<String>,
     ) {
+        // Scenes first — a phantom button is pressed, not levelled.
+        if let Some(&scene_idx) = self.hc_to_scene.get(hc_id) {
+            if payload["activate"].as_bool() == Some(true) {
+                let scene = &self.scenes[scene_idx];
+                let bridge_id = scene.config.bridge_id;
+                let btn = scene.config.button_component;
+                let press = cmd_device_action(bridge_id, btn, 3);
+                let release = cmd_device_action(bridge_id, btn, 4);
+                if let Err(e) = send_cmd(writer, &press).await {
+                    warn!(error = %e, "Failed to press scene button");
+                    return;
+                }
+                // The bridge wants a real press, so hold briefly before
+                // releasing — a press/release in the same instant is ignored.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                if let Err(e) = send_cmd(writer, &release).await {
+                    warn!(error = %e, "Failed to release scene button");
+                    return;
+                }
+
+                // Optimistic: the bridge sends no LED event for a programmatic
+                // phantom press, so nothing would otherwise confirm it ran.
+                let patch = serde_json::json!({ "on": true });
+                let _ = self.publisher.publish_state(hc_id, &patch).await;
+                info!(scene = %hc_id, button = btn, "Scene activated");
+            }
+            return;
+        }
+
         let Some(&integration_id) = self.hc_to_id.get(hc_id) else {
             debug!(hc_id, "Command for unknown device");
             return;
@@ -246,7 +289,7 @@ impl Bridge {
 
 fn optimistic_state(cmd: &serde_json::Value, dev: &DeviceEntry) -> Option<serde_json::Value> {
     use crate::config::DeviceKind;
-    match dev.config.kind {
+    match dev.kind {
         DeviceKind::Dimmer => {
             if let Some(b) = cmd.get("brightness_pct").and_then(|v| v.as_f64()) {
                 Some(serde_json::json!({"on": b > 0.0, "brightness_pct": b}))

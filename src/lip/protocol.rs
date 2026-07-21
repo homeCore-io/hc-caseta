@@ -188,6 +188,14 @@ pub fn query_output(integration_id: u32) -> String {
     format!("?OUTPUT,{integration_id},1")
 }
 
+/// `#DEVICE,{id},{component},{action}` for press(3)/release(4).
+///
+/// Used to activate a scene: the Smart Bridge's phantom buttons are pressed
+/// exactly as a physical button would be.
+pub fn cmd_device_action(integration_id: u32, component: u32, action: u8) -> String {
+    format!("#DEVICE,{integration_id},{component},{action}")
+}
+
 /// Format fade seconds as `H:MM:SS`.  Returns empty string for 0 or negative.
 fn format_fade(secs: f64) -> String {
     if secs <= 0.0 {
