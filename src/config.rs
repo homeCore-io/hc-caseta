@@ -13,6 +13,177 @@ pub fn config_schema() -> Option<serde_json::Value> {
     None
 }
 
+/// The plugin's own **config descriptor** — how this configuration should be
+/// presented, which a JSON Schema cannot express: the bridge auth as a proper
+/// connection block, a device table with a typed `kind` picker, units, and
+/// prose. Published on the capability manifest; core serves it at
+/// `GET /plugins/{id}/config/descriptor`.
+///
+/// Coverage note (phase 6): a published descriptor is authoritative, so an
+/// omitted key is uneditable. Every `Config` key is represented except two,
+/// both deliberate: `homecore.plugin_id` is bootstrap identity fixed at
+/// install, and `devices[].buttons` (Pico/keypad button-component numbers) is
+/// reserved for future use — unread by this plugin today, so it stays in TOML
+/// rather than shipping a column that does nothing.
+///
+/// Caséta has no device-list URL (unlike RA2's DbXmlInfo.xml), so devices are
+/// entered by hand — the Devices table writes the `[[devices]]` array directly.
+/// `descriptor_covers_every_schema_field` pins all of it, table columns
+/// included.
+pub fn config_descriptor() -> serde_json::Value {
+    use plugin_sdk_rs::config_descriptor::{Descriptor, Field, Section, Source};
+
+    Descriptor::new("plugin.caseta")
+        .title("Lutron Caséta")
+        .section(
+            Section::new("bridge", "Bridge")
+                .field(Field::note(
+                    "The Caséta Smart Bridge PRO (not the standard bridge) exposes \
+                     the Telnet integration this plugin uses. Enable it in the \
+                     Lutron app under Advanced → Integration.",
+                ))
+                .field(
+                    Field::host("caseta.host")
+                        .label("Bridge host")
+                        .placeholder("10.0.0.x")
+                        .help("IP address of the Caséta Smart Bridge PRO."),
+                )
+                .field(Field::port("caseta.port").label("Port").default(23))
+                .field(
+                    Field::text("caseta.username")
+                        .label("Username")
+                        .default("lutron"),
+                )
+                .field(
+                    Field::secret("caseta.password")
+                        .label("Password")
+                        .help("Integration login. Factory default is lutron / integration."),
+                )
+                .field(
+                    Field::number("caseta.default_fade_secs")
+                        .label("Default fade")
+                        .unit("secs")
+                        .default(1.0)
+                        .min(0)
+                        .help("Dimmer/shade transition time. Override per device in the table below."),
+                )
+                .field(
+                    Field::duration("caseta.reconnect_delay_secs")
+                        .label("Reconnect delay")
+                        .unit("secs")
+                        .default(5)
+                        .min(1)
+                        .help("Backoff before retrying a dropped bridge connection."),
+                ),
+        )
+        .section(
+            Section::new("devices", "Devices")
+                .field(Field::note(
+                    "Caséta has no queryable device list, so add each device by its \
+                     integration ID — find IDs in the Lutron app or at \
+                     http://{bridge}/DbXmlInfo.xml on a PRO bridge.",
+                ))
+                .field(
+                    Field::table("devices")
+                        .label("Devices")
+                        .render("cards")
+                        .help("Each row maps a Caséta integration ID to a homeCore device.")
+                        .columns([
+                            Field::int("integration_id").label("Integration ID"),
+                            Field::text("name").label("Name"),
+                            Field::select("kind")
+                                .label("Kind")
+                                .option("dimmer", "Dimmer")
+                                .option("switch", "Switch")
+                                .option("shade", "Shade")
+                                .option("fan_control", "Fan")
+                                .option("pico", "Pico remote")
+                                .option("occupancy_sensor", "Occupancy sensor"),
+                            Field::select("area")
+                                .label("Room")
+                                .placeholder("Unassigned")
+                                .allow_create()
+                                .source(Source::core_resource("areas")),
+                            // Optional in `DeviceConfig` — empty inherits
+                            // `caseta.default_fade_secs`, so no `.default()`.
+                            Field::number("fade_secs")
+                                .label("Fade")
+                                .unit("secs")
+                                .min(0)
+                                .placeholder("Default"),
+                            // Shades only, but the renderer evaluates
+                            // `visible_when` against the whole config, never a
+                            // table row, so the column is always shown.
+                            Field::toggle("invert_position")
+                                .label("Invert position")
+                                .default(false),
+                        ]),
+                ),
+        )
+        .section(
+            Section::new("logging", "Logging")
+                .field(
+                    Field::text("logging.level")
+                        .label("Level")
+                        .default("info")
+                        .placeholder("info | debug | hc_caseta=debug"),
+                )
+                .field(
+                    Field::enumeration("logging.log_forward_level")
+                        .label("Forward to core")
+                        .render("segmented")
+                        .default("info")
+                        .help(
+                            "Minimum level forwarded to homeCore over MQTT; \
+                             anything below is written locally only.",
+                        )
+                        .option("off", "Off")
+                        .option("error", "Error")
+                        .option("warn", "Warn")
+                        .option("info", "Info")
+                        .option("debug", "Debug"),
+                )
+                .field(
+                    Field::enumeration("logging.rotation")
+                        .label("Rotate")
+                        .render("segmented")
+                        .default("daily")
+                        .option("hourly", "Hourly")
+                        .option("daily", "Daily")
+                        .option("weekly", "Weekly")
+                        .option("never", "Never"),
+                )
+                .field(
+                    Field::int("logging.max_size_mb")
+                        .label("Rotate at size")
+                        .unit("MB")
+                        .default(100)
+                        .min(0)
+                        .help("Whichever comes first, this or the schedule. 0 disables size-based rotation."),
+                )
+                .field(
+                    Field::int("logging.prune_after_days")
+                        .label("Prune after")
+                        .unit("days")
+                        .default(0)
+                        .min(0)
+                        .help("Delete rotated files older than this. 0 = never prune."),
+                )
+                .field(
+                    Field::toggle("logging.compress")
+                        .label("Compress rotated files")
+                        .default(true),
+                ),
+        )
+        .section(
+            Section::new("connection", "Connection")
+                .hidden()
+                .field(Field::host("homecore.broker_host").label("Broker host"))
+                .field(Field::port("homecore.broker_port").label("Broker port"))
+                .field(Field::secret("homecore.password").label("Broker password")),
+        )
+        .build()
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -152,4 +323,35 @@ pub struct DeviceConfig {
     #[serde(default)]
     #[allow(dead_code)]
     pub buttons: Vec<u32>,
+}
+
+#[cfg(all(test, feature = "schema"))]
+mod tests {
+    use super::*;
+
+    /// A published descriptor is *authoritative* — the editor renders it
+    /// instead of deriving from the schema — so any omitted config field
+    /// becomes uneditable (the hc-sonos logging bug, `5bccebf`). The check
+    /// lives in the SDK; every schema leaf must be covered or justified.
+    ///
+    /// The SDK descends into arrays of objects, so the Devices table is
+    /// checked column by column too.
+    #[test]
+    fn descriptor_covers_every_schema_field() {
+        let missing = plugin_sdk_rs::config_descriptor::missing_schema_coverage(
+            &config_schema().expect("schema feature is on"),
+            &config_descriptor(),
+            &[
+                // Bootstrap identity fixed at install, not an operator setting.
+                "homecore.plugin_id",
+                // Reserved for future use (Pico/keypad button components) and
+                // unread by the plugin today — a column would do nothing.
+                "devices[].buttons",
+            ],
+        );
+        assert!(
+            missing.is_empty(),
+            "config fields missing from the descriptor: {missing:?}"
+        );
+    }
 }
