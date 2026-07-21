@@ -99,7 +99,10 @@ pub fn config_descriptor() -> serde_json::Value {
                 .field(
                     Field::table("devices")
                         .label("Devices")
-                        .render("cards")
+                        // A card per device is unreadable past a handful, and
+                        // an integration report lands nine at once.
+                        .render("list")
+                        .group_by("area")
                         // Identity for the importer: re-pasting a report
                         // updates nothing and duplicates nothing.
                         .key_by("integration_id")
@@ -107,8 +110,13 @@ pub fn config_descriptor() -> serde_json::Value {
                         .columns([
                             Field::int("integration_id").label("Integration ID"),
                             Field::text("name").label("Name"),
+                            // The report carries no load type, so an imported
+                            // row arrives without one. Flag it rather than
+                            // guess — and rather than block the save, since the
+                            // plugin skips such a device and logs it.
                             Field::select("kind")
                                 .label("Kind")
+                                .prompt_when_empty()
                                 .option("dimmer", "Dimmer")
                                 .option("switch", "Switch")
                                 .option("shade", "Shade")
@@ -146,7 +154,7 @@ pub fn config_descriptor() -> serde_json::Value {
                 .field(
                     Field::table("scenes")
                         .label("Scenes")
-                        .render("cards")
+                        .render("list")
                         .key_by("button_component")
                         .columns([
                             Field::text("name").label("Name"),
