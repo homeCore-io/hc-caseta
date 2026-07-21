@@ -26,8 +26,9 @@ pub fn config_schema() -> Option<serde_json::Value> {
 /// reserved for future use — unread by this plugin today, so it stays in TOML
 /// rather than shipping a column that does nothing.
 ///
-/// Caséta has no device-list URL (unlike RA2's DbXmlInfo.xml), so devices are
-/// entered by hand — the Devices table writes the `[[devices]]` array directly.
+/// Caséta has no queryable device list (unlike RadioRA 2), so the Devices
+/// table writes the `[[devices]]` array directly — filled either by hand or
+/// from a pasted integration report via the `import` field (see [`crate::import`]).
 /// `descriptor_covers_every_schema_field` pins all of it, table columns
 /// included.
 pub fn config_descriptor() -> serde_json::Value {

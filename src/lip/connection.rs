@@ -1,6 +1,12 @@
-//! TCP connection to the Lutron RA2 Main Repeater.
+//! TCP connection to the Caséta Smart Bridge PRO.
 //!
-//! The RA2 speaks a line-oriented telnet-style protocol on port 23.
+//! This module began as a copy of hc-lutron's, since Caséta's LIP is a subset
+//! of RadioRA 2's — same telnet transport, same `~OUTPUT`/`~DEVICE` grammar.
+//! The differences are real though, and are noted where they bite: the PRO
+//! bridge has no `#MONITORING` subscription step, and answers no `?MONITORING`
+//! query.
+//!
+//! The bridge speaks a line-oriented telnet-style protocol on port 23.
 //! After login the controller emits `GNET> ` as a ready prompt.  All
 //! unsolicited event lines start with `~`.
 //!
@@ -93,15 +99,28 @@ pub fn spawn_writer(mut write_half: tokio::net::tcp::OwnedWriteHalf) -> mpsc::Se
 // Connect + login
 // ---------------------------------------------------------------------------
 
-/// Connect to the RA2 repeater, authenticate, send MONITORING subscriptions,
-/// and return the reader + write channel.
+/// Connect to the bridge, authenticate, and return the reader + write channel.
+///
+/// No `#MONITORING` subscriptions are sent, unlike hc-lutron — and that is
+/// correct, not an oversight in the port. Verified against a live PRO bridge
+/// (2026-07-21):
+///
+/// - `?MONITORING,<type>` drew no reply for any of types 3/4/5/6/8/13, while
+///   `?OUTPUT` answered immediately. The monitoring commands are simply not
+///   implemented, so there is nothing to subscribe to.
+/// - With two independent sessions logged in, a zone changed by one was
+///   reported to the *other* as an unsolicited `~OUTPUT` within a second. The
+///   bridge broadcasts to every session unbidden.
+///
+/// So this plugin hears external changes — a wall switch, the Lutron app,
+/// another integration — with no subscription step at all.
 pub async fn connect(
     host: &str,
     port: u16,
     username: &str,
     password: &str,
 ) -> Result<(LipReader, mpsc::Sender<String>)> {
-    info!(host, port, "Connecting to Lutron RA2 repeater");
+    info!(host, port, "Connecting to Caséta Smart Bridge");
     let stream = TcpStream::connect((host, port))
         .await
         .with_context(|| format!("TCP connect to {host}:{port} failed"))?;
@@ -115,7 +134,7 @@ pub async fn connect(
 
     login(&mut reader, &write_tx, username, password).await?;
 
-    info!("Lutron RA2 ready");
+    info!("Caséta bridge ready");
     Ok((reader, write_tx))
 }
 
@@ -142,7 +161,7 @@ async fn login(
         .await
         .context("Timed out waiting for GNET> after login")?;
 
-    info!("Lutron RA2 login successful");
+    info!("Caséta bridge login successful");
     Ok(())
 }
 
