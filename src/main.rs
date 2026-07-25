@@ -4,6 +4,7 @@ mod devices;
 mod import;
 mod lip;
 mod logging;
+mod schema;
 
 use anyhow::Result;
 use plugin_sdk_rs::{PluginClient, PluginConfig};
@@ -244,6 +245,20 @@ async fn try_start(
         }
         if let Err(e) = publisher.publish_availability(&dev.hc_id, true).await {
             warn!(hc_id = %dev.hc_id, error = %e, "Failed to publish availability");
+        }
+        // A Pico's buttons, which the integration report has always known.
+        if let Some(schema) = crate::schema::device_schema_json(&dev.config) {
+            if let Err(e) = publisher
+                .register_device_schema_json(&dev.hc_id, &schema)
+                .await
+            {
+                warn!(hc_id = %dev.hc_id, error = %e, "Failed to publish device schema");
+            }
+        }
+        if let Some(cat) = crate::schema::button_catalogue(&dev.config) {
+            if let Err(e) = publisher.publish_state_partial(&dev.hc_id, &cat).await {
+                warn!(hc_id = %dev.hc_id, error = %e, "Failed to publish button catalogue");
+            }
         }
     }
 

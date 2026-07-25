@@ -159,6 +159,18 @@ pub fn parse_integration_report(text: &str) -> Result<Import> {
             if let Some(area) = area_of(dev) {
                 row["area"] = json!(area);
             }
+            // The report tells us exactly which buttons this Pico has, and
+            // until now only their *existence* was used — to recognise a Pico —
+            // while the numbers were dropped. They are what a rule editor needs
+            // to offer "button 2" instead of asking for a component number.
+            let numbers: Vec<u64> = buttons
+                .unwrap_or(&vec![])
+                .iter()
+                .filter_map(|b| b.get("Number").and_then(Value::as_u64))
+                .collect();
+            if !numbers.is_empty() {
+                row["buttons"] = json!(numbers);
+            }
             out.devices.push(row);
         }
     }

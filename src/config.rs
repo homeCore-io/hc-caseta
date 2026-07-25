@@ -427,9 +427,12 @@ pub struct DeviceConfig {
     #[serde(default)]
     pub invert_position: bool,
     /// Pico button component numbers (e.g. [2, 3, 4, 5, 6]).
-    /// Reserved for future use (button name mapping).
+    ///
+    /// Published as `available_buttons` so a rule editor can name the buttons
+    /// of a Pico rather than asking for a component number. Filled in by the
+    /// integration report import; empty on a config written before that
+    /// carried the numbers through, in which case no catalogue is published.
     #[serde(default)]
-    #[allow(dead_code)]
     pub buttons: Vec<u32>,
 }
 
