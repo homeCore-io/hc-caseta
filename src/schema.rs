@@ -22,11 +22,7 @@ fn ro(kind: AttributeKind, display: &str) -> AttributeSchema {
         kind,
         writable: false,
         display_name: Some(display.to_string()),
-        unit: None,
-        min: None,
-        max: None,
-        step: None,
-        options: None,
+        ..Default::default()
     }
 }
 
