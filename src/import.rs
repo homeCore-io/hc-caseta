@@ -33,7 +33,8 @@ pub struct Import {
 }
 
 impl Import {
-    /// One line for the operator: what landed, and what did not.
+    /// One line for the operator: what landed, what still needs a decision,
+    /// and what did not land at all.
     pub fn summary(&self) -> String {
         let mut s = format!(
             "Imported {} device{}, {} scene{}.",
@@ -42,6 +43,33 @@ impl Import {
             self.scenes.len(),
             plural(self.scenes.len()),
         );
+
+        // The count that actually explains what happens next.
+        //
+        // A zone arrives without a kind and is skipped at startup until one is
+        // chosen, which is correct but invisible: the plugin warns to its own
+        // log, and an operator watching the device list just sees most of the
+        // import missing. Saying it here puts the number where the import
+        // happened.
+        let undecided = self
+            .devices
+            .iter()
+            .filter(|d| d.get("kind").is_none_or(Value::is_null))
+            .count();
+        if undecided > 0 {
+            s.push_str(&format!(
+                " {undecided} need{} a Kind before {} appear as device{} — the report does not \
+                 say whether a zone is a dimmer, a switch or a shade.",
+                if undecided == 1 { "s" } else { "" },
+                if undecided == 1 {
+                    "it will"
+                } else {
+                    "they will"
+                },
+                plural(undecided),
+            ));
+        }
+
         for note in &self.skipped {
             s.push(' ');
             s.push_str(note);
@@ -152,9 +180,27 @@ pub fn parse_integration_report(text: &str) -> Result<Import> {
             continue;
         }
 
+        // A non-bridge device with no buttons used to fall off the end of this
+        // loop and vanish — no row, and not even a line in `skipped`, so the
+        // report and the imported list simply disagreed with no explanation.
+        // Occupancy sensors arrive exactly this way, and `occupancy_sensor` is
+        // a kind this plugin supports, so import could never produce one.
+        //
+        // Imported as a kind-less row, like a zone: the report does not say
+        // what it is either, and a row the operator can classify beats a device
+        // that silently does not exist.
+        if buttons.is_none_or(|b| b.is_empty()) {
+            let mut row = json!({ "integration_id": id, "name": name });
+            if let Some(area) = area_of(dev) {
+                row["area"] = json!(area);
+            }
+            out.devices.push(row);
+            continue;
+        }
+
         // Anything else carrying buttons is a Pico. Unlike a zone's load type,
         // this one the report does tell us.
-        if buttons.is_some_and(|b| !b.is_empty()) {
+        {
             let mut row = json!({ "integration_id": id, "name": name, "kind": "pico" });
             if let Some(area) = area_of(dev) {
                 row["area"] = json!(area);
@@ -193,7 +239,9 @@ mod tests {
           {"Name":"Button 5","Number":5},
           {"Name":"Button 6","Number":6}]},
         {"ID":6,"Area":{"Name":"Living Room"},"Name":"Pico","Buttons":[{"Number":2},{"Number":3}]},
-        {"ID":9,"Name":"Remote 1","Buttons":[{"Number":2}]}],
+        {"ID":9,"Name":"Remote 1","Buttons":[{"Number":2}]},
+        {"ID":11,"Name":"Hall Sensor","Area":{"Name":"Hallway"}},
+        {"ID":12,"Name":"Porch Sensor","Buttons":[]}],
       "Zones":[
         {"ID":2,"Name":"Holiday Lights 1","Area":{"Name":"Living Room"}},
         {"ID":10,"Name":"String Lights","Area":{"Name":"Outdoor"}}]}}"#;
@@ -208,6 +256,52 @@ mod tests {
         // The report has no load type; guessing one would drive a switch as a
         // dimmer. The operator picks.
         assert!(zone.get("kind").is_none());
+    }
+
+    #[test]
+    fn a_device_with_no_buttons_still_imports() {
+        // These used to fall off the end of the Devices loop: no row, and not
+        // even a line in `skipped`, so the report and the imported list
+        // disagreed with nothing to explain it. Occupancy sensors arrive
+        // exactly this way, and `occupancy_sensor` is a kind this plugin
+        // supports — so import could never produce one.
+        let out = parse_integration_report(REPORT).unwrap();
+
+        let sensor = out
+            .devices
+            .iter()
+            .find(|d| d["integration_id"] == 11)
+            .expect("a buttonless device must import, not vanish");
+        assert_eq!(sensor["name"], "Hall Sensor");
+        assert_eq!(sensor["area"], "Hallway");
+        // Kind-less like a zone: the report does not say what it is, and the
+        // operator classifies it. Guessing `occupancy_sensor` would be wrong
+        // for anything else that ships without buttons.
+        assert!(sensor.get("kind").is_none());
+
+        // An empty Buttons array is the same case as none at all.
+        assert!(
+            out.devices.iter().any(|d| d["integration_id"] == 12),
+            "an empty Buttons list is not a Pico, but it is still a device"
+        );
+    }
+
+    #[test]
+    fn the_summary_names_the_rows_that_still_need_a_kind() {
+        // The count that explains why a 6-row import shows 2 devices. Without
+        // it the only notice is a warn! in the plugin's own log.
+        let out = parse_integration_report(REPORT).unwrap();
+        let summary = out.summary();
+        let undecided = out
+            .devices
+            .iter()
+            .filter(|d| d.get("kind").is_none_or(Value::is_null))
+            .count();
+        assert_eq!(undecided, 4, "2 zones + 2 buttonless devices");
+        assert!(
+            summary.contains(&format!("{undecided} need")),
+            "summary must say how many need a Kind, got: {summary}"
+        );
     }
 
     #[test]
