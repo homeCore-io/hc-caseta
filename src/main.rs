@@ -7,6 +7,7 @@ mod logging;
 mod schema;
 
 use anyhow::Result;
+use plugin_sdk_rs::types::PluginNotice;
 use plugin_sdk_rs::{PluginClient, PluginConfig};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -121,6 +122,9 @@ async fn try_start(
         &cfg.logging.log_forward_level,
     );
     let publisher = client.device_publisher();
+    // Conditions for the plugin page, not only the log. Taken before run()
+    // consumes the client.
+    let notices = client.notices();
     let (cmd_tx, cmd_rx) = mpsc::channel::<(String, serde_json::Value)>(256);
 
     // Enable management protocol (heartbeat + remote config/log commands).
@@ -297,7 +301,22 @@ async fn try_start(
     }
 
     // --- Build and run bridge ---------------------------------------------------
-    let mut bridge = bridge::Bridge::new(devices, scenes, publisher, cfg.caseta.clone());
+    if cfg.caseta.host.trim().is_empty() {
+        notices.raise(
+            PluginNotice::error(
+                "not_configured",
+                "No Smart Bridge PRO address is set, so this plugin cannot connect to \
+                 anything.",
+            )
+            .with_remedy(
+                "Set the bridge's IP under Configuration, with the telnet integration \
+                 username and password. Note this needs the Smart Bridge **PRO** — the \
+                 standard bridge has no telnet integration to connect to.",
+            ),
+        );
+    }
+
+    let mut bridge = bridge::Bridge::new(devices, scenes, publisher, cfg.caseta.clone(), notices);
     bridge.run(cmd_rx).await;
     Ok(())
 }

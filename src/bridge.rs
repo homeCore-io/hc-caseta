@@ -15,7 +15,8 @@ use crate::lip::connection::{connect, send_cmd, send_keepalive};
 use crate::lip::protocol::{
     cmd_device_action, query_output, DeviceAction, LipMessage, OccupancyState, OutputAction,
 };
-use plugin_sdk_rs::DevicePublisher;
+use plugin_sdk_rs::types::PluginNotice;
+use plugin_sdk_rs::{DevicePublisher, PluginNotices};
 
 // ---------------------------------------------------------------------------
 // Bridge
@@ -30,6 +31,10 @@ pub struct Bridge {
     publisher: DevicePublisher,
     caseta_cfg: CasetaConfig,
     global_fade: f64,
+    /// What to tell the operator on the plugin page when the bridge is not
+    /// answering — the reconnect loop is otherwise silent apart from a log
+    /// line, while the plugin keeps reading "active".
+    notices: PluginNotices,
 }
 
 impl Bridge {
@@ -38,6 +43,7 @@ impl Bridge {
         scenes: Vec<SceneEntry>,
         publisher: DevicePublisher,
         caseta_cfg: CasetaConfig,
+        notices: PluginNotices,
     ) -> Self {
         let global_fade = caseta_cfg.default_fade_secs;
         let mut dev_map = HashMap::new();
@@ -62,6 +68,7 @@ impl Bridge {
             publisher,
             caseta_cfg,
             global_fade,
+            notices,
         }
     }
 
@@ -72,7 +79,23 @@ impl Bridge {
             match self.run_once(&mut cmd_rx).await {
                 Ok(()) => info!("Bridge session ended cleanly"),
                 Err(e) => {
-                    error!(error = %e, "Bridge session error — reconnecting in {}s", delay.as_secs())
+                    error!(error = %e, "Bridge session error — reconnecting in {}s", delay.as_secs());
+                    self.notices.raise(
+                        PluginNotice::error(
+                            "bridge_unreachable",
+                            format!(
+                                "Cannot reach the Smart Bridge PRO at {}:{} — {e}. Every \
+                                 load and Pico served by this plugin is unavailable.",
+                                self.caseta_cfg.host, self.caseta_cfg.port
+                            ),
+                        )
+                        .with_remedy(
+                            "Check the bridge is powered and on the network, and that \
+                             Telnet Support is enabled in the Lutron app under Advanced → \
+                             Integration. Only the Smart Bridge PRO exposes it; the \
+                             standard bridge does not.",
+                        ),
+                    );
                 }
             }
             for dev in self.devices.values() {
@@ -97,6 +120,9 @@ impl Bridge {
         .await?;
 
         info!("Connected to Caseta Pro bridge");
+        // Recovered — clear here rather than in the caller so a bridge that
+        // drops and comes back leaves nothing stale on the page.
+        self.notices.clear("bridge_unreachable");
 
         for dev in self.devices.values() {
             let _ = self.publisher.publish_availability(&dev.hc_id, true).await;
