@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use crate::config::{DeviceConfig, DeviceKind};
+use crate::config::{DeviceConfig, DeviceKind, SceneConfig};
 use crate::lip::protocol::{cmd_set_level, cmd_shade_action};
 
 // ---------------------------------------------------------------------------
@@ -13,17 +13,26 @@ pub struct DeviceEntry {
     pub config: DeviceConfig,
     /// `caseta_{integration_id}`
     pub hc_id: String,
+    /// Resolved at construction — an entry only exists for a configured kind.
+    pub kind: DeviceKind,
 }
 
 impl DeviceEntry {
-    pub fn new(config: DeviceConfig) -> Self {
+    /// `None` when the row has no `kind` yet — an imported device the operator
+    /// has not classified. The caller reports it rather than failing outright.
+    pub fn new(config: DeviceConfig) -> Option<Self> {
+        let kind = config.kind.clone()?;
         let hc_id = format!("caseta_{}", config.integration_id);
-        Self { config, hc_id }
+        Some(Self {
+            config,
+            hc_id,
+            kind,
+        })
     }
 
     /// HomeCore device_type string for registration.
     pub fn homecore_device_type(&self) -> &str {
-        match self.config.kind {
+        match self.kind {
             DeviceKind::Dimmer => "light",
             DeviceKind::Switch => "switch",
             DeviceKind::Shade => "cover",
@@ -36,19 +45,19 @@ impl DeviceEntry {
     /// Whether this device is an OUTPUT that can be level-queried on connect.
     pub fn is_output(&self) -> bool {
         matches!(
-            self.config.kind,
+            self.kind,
             DeviceKind::Dimmer | DeviceKind::Switch | DeviceKind::Shade | DeviceKind::FanControl
         )
     }
 
     /// Whether this device is an occupancy group.
     pub fn is_group(&self) -> bool {
-        matches!(self.config.kind, DeviceKind::OccupancySensor)
+        matches!(self.kind, DeviceKind::OccupancySensor)
     }
 
     /// Whether this device emits button events (Pico remote).
     pub fn is_button_device(&self) -> bool {
-        matches!(self.config.kind, DeviceKind::Pico)
+        matches!(self.kind, DeviceKind::Pico)
     }
 
     /// Effective fade time: per-device override or global default.
@@ -62,7 +71,7 @@ impl DeviceEntry {
 
     /// Translate a LIP output level (0.0–100.0) to a HomeCore state patch.
     pub fn translate_output_state(&self, level: f64) -> Option<Value> {
-        match self.config.kind {
+        match self.kind {
             DeviceKind::Dimmer => Some(serde_json::json!({
                 "on":             level > 0.0,
                 "brightness_pct": (level * 10.0).round() / 10.0,
@@ -116,7 +125,7 @@ impl DeviceEntry {
             .unwrap_or_else(|| self.fade_secs(global_fade));
         let id = self.config.integration_id;
 
-        match self.config.kind {
+        match self.kind {
             DeviceKind::Dimmer => {
                 let level = if let Some(b) = cmd["brightness_pct"].as_f64() {
                     b.clamp(0.0, 100.0)
@@ -193,5 +202,23 @@ impl DeviceEntry {
             // Pico and OccupancySensor are read-only.
             DeviceKind::Pico | DeviceKind::OccupancySensor => vec![],
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SceneEntry
+// ---------------------------------------------------------------------------
+
+/// A phantom button on the Smart Bridge, published to homeCore as a scene.
+pub struct SceneEntry {
+    pub config: SceneConfig,
+    /// `caseta_scene_{name_slug}`
+    pub hc_id: String,
+}
+
+impl SceneEntry {
+    pub fn new(config: SceneConfig) -> Self {
+        let hc_id = config.hc_id();
+        Self { config, hc_id }
     }
 }
