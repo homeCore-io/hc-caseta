@@ -19,9 +19,23 @@ Requires the **Caseta Smart Bridge Pro** (L-BDGPRO2-WH). The standard Caseta bri
 
 ## Setup
 
-1. Copy `config/config.toml.example` to `config/config.toml`
-2. Set the bridge IP and device integration IDs (find IDs at `http://{bridge_ip}/DbXmlInfo.xml`)
-3. Add a `[[plugins]]` entry in `homecore.toml`
+Install it from the web UI — **Plugins → Add** — then open its
+**Configuration** tab and set the bridge IP and the device integration IDs.
+Find the IDs at `http://{bridge_ip}/DbXmlInfo.xml`.
+
+homeCore records the install itself, so there is no `[[plugins]]` block to
+write. It owns the config file too — `config/plugins/plugin.caseta.toml` under
+homeCore's home directory — and restarts the plugin when that file changes.
+
+## Notices
+
+Problems are reported as **notices**, shown on the plugin's card in the web
+UI. They are state rather than log lines.
+
+| Code | Means |
+|---|---|
+| `not_configured` | No bridge address or credentials yet. |
+| `bridge_unreachable` | The Smart Bridge Pro is not answering. Clears on reconnect. |
 
 ## Configuration
 
